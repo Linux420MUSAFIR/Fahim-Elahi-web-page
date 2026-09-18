@@ -1,51 +1,35 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Compass } from 'lucide-react';
 
 export const HeroSection: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
+  const [videoLoaded, setVideoLoaded] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     const container = videoContainerRef.current;
     if (!video || !container) return;
 
-    // Respect prefers-reduced-motion
+    // Respect user motion preference
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // Center resting progress (0.5 = looking straight ahead)
+    // Center resting progress (0.5 = character looks straight ahead)
     let targetProgress = 0.5;
-    let currentProgress = 0.5;
     let targetProgressY = 0.5;
+    let currentProgress = 0.5;
     let currentProgressY = 0.5;
 
     let animId: number | null = null;
     let isSeeking = false;
-    let pendingSeekTime: number | null = null;
+    let pendingTime: number | null = null;
     let seekTimeoutId: number | null = null;
     let isHeroInView = true;
-    let activeBlobUrl: string | null = null;
+    let isInteracting = false;
+    let idleTimerId: number | null = null;
+    let idleStartTime = Date.now();
 
-    // Eagerly preload video directly into browser memory (RAM) via Blob.
-    // This eliminates Vercel Edge / CDN network Range request roundtrips during mouse scrub.
-    const controller = new AbortController();
-    fetch('/character-anim.mp4', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error('Blob fetch failed');
-        return res.blob();
-      })
-      .then((blob) => {
-        if (!video) return;
-        activeBlobUrl = URL.createObjectURL(blob);
-        const curTime = video.currentTime || targetProgress * (video.duration || 5.06);
-        video.src = activeBlobUrl;
-        video.load();
-        video.currentTime = curTime;
-      })
-      .catch(() => {
-        // Fallback to standard <source> loading
-      });
-
-    // Cache viewport dimensions to avoid forced synchronous layout on mousemove
+    // Cache viewport dimensions
     let cachedWidth = window.innerWidth || 1;
     let cachedHeight = window.innerHeight || 1;
 
@@ -55,17 +39,31 @@ export const HeroSection: React.FC = () => {
     };
     window.addEventListener('resize', onResize, { passive: true });
 
-    // Direct cursor progress mapping:
-    // Left (normX ~ 0) -> progress ~ 0
-    // Right (normX ~ 1) -> progress ~ 1
+    // Mark interaction and schedule idle return
+    const recordInteraction = () => {
+      isInteracting = true;
+      if (idleTimerId !== null) {
+        window.clearTimeout(idleTimerId);
+      }
+      idleTimerId = window.setTimeout(() => {
+        isInteracting = false;
+        idleStartTime = Date.now();
+      }, 2500);
+    };
+
+    // Direct cursor tracking:
+    // Left (normX ~ 0.0) -> video start frame (looks left)
+    // Center (normX ~ 0.5) -> video center frame (looks straight)
+    // Right (normX ~ 1.0) -> video end frame (looks right)
     const updatePointer = (clientX: number, clientY: number) => {
       if (!isHeroInView || prefersReducedMotion) return;
+      recordInteraction();
+
       const normX = Math.max(0, Math.min(clientX / cachedWidth, 1));
       const normY = Math.max(0, Math.min(clientY / cachedHeight, 1));
-      
-      // Direct mouse tracking: character follows the cursor
+
       targetProgress = Math.max(0.01, Math.min(0.99, normX));
-      targetProgressY = normY;
+      targetProgressY = Math.max(0.01, Math.min(0.99, normY));
     };
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -88,7 +86,70 @@ export const HeroSection: React.FC = () => {
     window.addEventListener('touchstart', handleTouchStart, { passive: true });
     window.addEventListener('touchmove', handleTouchMove, { passive: true });
 
-    // IntersectionObserver to suspend physics loop & video processing when scrolled out of view
+    // High-performance, non-blocking seek pipeline
+    const onSeekDone = () => {
+      if (seekTimeoutId !== null) {
+        window.clearTimeout(seekTimeoutId);
+        seekTimeoutId = null;
+      }
+      isSeeking = false;
+
+      // If a newer frame position arrived while previous frame was decoding, seek to it immediately
+      if (pendingTime !== null && video && video.duration) {
+        const next = pendingTime;
+        pendingTime = null;
+        if (Math.abs(next - video.currentTime) > 0.018) {
+          executeSeek(next);
+        }
+      }
+    };
+
+    const executeSeek = (time: number) => {
+      if (!video || !video.duration || isNaN(time)) return;
+      const clamped = Math.max(0.01, Math.min(time, video.duration - 0.01));
+
+      if (isSeeking) {
+        pendingTime = clamped;
+        return;
+      }
+
+      isSeeking = true;
+      video.currentTime = clamped;
+
+      // Sync with modern browser video compositor if supported
+      if ('requestVideoFrameCallback' in video) {
+        try {
+          (video as any).requestVideoFrameCallback(() => {
+            onSeekDone();
+          });
+        } catch {
+          // Fallback to seeked event
+        }
+      }
+
+      // Safety timeout: prevents seek queue from ever stalling
+      if (seekTimeoutId !== null) window.clearTimeout(seekTimeoutId);
+      seekTimeoutId = window.setTimeout(onSeekDone, 40);
+    };
+
+    video.addEventListener('seeked', onSeekDone);
+
+    // Initial setup when video metadata loads
+    const onLoadedMetadata = () => {
+      video.pause();
+      if (video.duration && !isNaN(video.duration)) {
+        // Center frame: looking straight forward
+        const centerTime = 0.5 * video.duration;
+        executeSeek(centerTime);
+      }
+    };
+
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    if (video.readyState >= 1 && video.duration) {
+      onLoadedMetadata();
+    }
+
+    // IntersectionObserver to pause loop when scrolled out of view
     const observer = new IntersectionObserver(
       (entries) => {
         isHeroInView = entries[0].isIntersecting;
@@ -97,10 +158,7 @@ export const HeroSection: React.FC = () => {
             cancelAnimationFrame(animId);
             animId = null;
           }
-          if (!video.paused) {
-            video.pause();
-          }
-        } else if (isHeroInView && animId === null && !prefersReducedMotion) {
+        } else if (animId === null && !prefersReducedMotion) {
           animId = requestAnimationFrame(renderLoop);
         }
       },
@@ -112,120 +170,62 @@ export const HeroSection: React.FC = () => {
       observer.observe(sectionEl);
     }
 
-    const onLoadedMetadata = () => {
-      video.pause();
-      if (video.duration && !isNaN(video.duration)) {
-        const initialTime = targetProgress * video.duration;
-        video.currentTime = initialTime;
-      }
-    };
-
-    video.addEventListener('loadedmetadata', onLoadedMetadata);
-    if (video.readyState >= 1 && video.duration) {
-      onLoadedMetadata();
-    }
-
-    const onSeeked = () => {
-      isSeeking = false;
-      if (seekTimeoutId !== null) {
-        window.clearTimeout(seekTimeoutId);
-        seekTimeoutId = null;
-      }
-      if (pendingSeekTime !== null && video && video.duration) {
-        const next = pendingSeekTime;
-        pendingSeekTime = null;
-        if (Math.abs(next - video.currentTime) > 0.015) {
-          isSeeking = true;
-          video.currentTime = next;
-        }
-      }
-    };
-
-    const applySeek = (time: number) => {
-      if (!video || !video.duration || isNaN(time)) return;
-      const clampedTime = Math.max(0.05, Math.min(time, video.duration - 0.05));
-
-      if (isSeeking || video.seeking) {
-        pendingSeekTime = clampedTime;
-        return;
-      }
-
-      isSeeking = true;
-      try {
-        if ('fastSeek' in video && typeof (video as any).fastSeek === 'function') {
-          (video as any).fastSeek(clampedTime);
-        } else {
-          video.currentTime = clampedTime;
-        }
-      } catch {
-        video.currentTime = clampedTime;
-      }
-
-      // Fallback safety timeout in case the seeked event doesn't trigger
-      if (seekTimeoutId !== null) window.clearTimeout(seekTimeoutId);
-      seekTimeoutId = window.setTimeout(() => {
-        isSeeking = false;
-        if (pendingSeekTime !== null && video && video.duration) {
-          const next = pendingSeekTime;
-          pendingSeekTime = null;
-          video.currentTime = next;
-        }
-      }, 40);
-    };
-
-    video.addEventListener('seeked', onSeeked);
-
-    // Ultra-smooth 60fps lerp physics loop
+    // 60-120 FPS buttery-smooth spring damping render loop
     const renderLoop = () => {
       if (!isHeroInView) return;
+
+      // Gentle ambient breathing idle motion when user isn't actively moving
+      if (!isInteracting && !prefersReducedMotion) {
+        const elapsed = (Date.now() - idleStartTime) * 0.001;
+        // Subtle ambient look around center (±0.06 amplitude)
+        targetProgress = 0.5 + Math.sin(elapsed * 0.8) * 0.06;
+        targetProgressY = 0.5 + Math.cos(elapsed * 0.6) * 0.04;
+      }
 
       const diffX = targetProgress - currentProgress;
       const diffY = targetProgressY - currentProgressY;
 
-      // Silky responsive exponential damping so it closely tracks the mouse without lag
-      if (Math.abs(diffX) > 0.0001 || Math.abs(diffY) > 0.0001) {
-        currentProgress += diffX * 0.18;
-        currentProgressY += diffY * 0.18;
+      // Silky organic exponential lerp (0.08 damping factor)
+      currentProgress += diffX * 0.08;
+      currentProgressY += diffY * 0.08;
 
-        // Subtle 3D parallax tracking along with cursor
-        const shiftX = (currentProgress - 0.5) * 28;
-        const shiftY = (currentProgressY - 0.5) * 16;
-        container.style.transform = `translate3d(${shiftX.toFixed(2)}px, ${shiftY.toFixed(2)}px, 0) scale(1.03)`;
+      // 1. Hardware accelerated 3D tilt & parallax (runs at display refresh rate on GPU)
+      const rotY = (currentProgress - 0.5) * 14;   // -7deg to +7deg
+      const rotX = -(currentProgressY - 0.5) * 8;  // -4deg to +4deg
+      const transX = (currentProgress - 0.5) * 32; // -16px to +16px
+      const transY = (currentProgressY - 0.5) * 18;
 
-        // Ultra-smooth video scrub seeking
-        if (video && video.duration && !isNaN(video.duration)) {
-          if (!video.paused) {
-            video.pause();
-          }
+      container.style.transform = `perspective(1200px) rotateY(${rotY.toFixed(2)}deg) rotateX(${rotX.toFixed(2)}deg) translate3d(${transX.toFixed(2)}px, ${transY.toFixed(2)}px, 0) scale(1.03)`;
 
-          const desiredTime = currentProgress * video.duration;
-          if (Math.abs(desiredTime - video.currentTime) > 0.012) {
-            applySeek(desiredTime);
-          }
+      // 2. Video frame scrub tracking (matches cursor position at full 1080p native quality)
+      if (video && video.duration && !isNaN(video.duration)) {
+        if (!video.paused) {
+          video.pause();
+        }
+        const desiredTime = currentProgress * video.duration;
+        if (Math.abs(desiredTime - video.currentTime) > 0.02) {
+          executeSeek(desiredTime);
         }
       }
 
       animId = requestAnimationFrame(renderLoop);
     };
 
-    if (isHeroInView && !prefersReducedMotion) {
+    if (!prefersReducedMotion) {
       animId = requestAnimationFrame(renderLoop);
     }
 
     return () => {
-      controller.abort();
       if (animId !== null) cancelAnimationFrame(animId);
       if (seekTimeoutId !== null) window.clearTimeout(seekTimeoutId);
-      if (activeBlobUrl) {
-        URL.revokeObjectURL(activeBlobUrl);
-      }
+      if (idleTimerId !== null) window.clearTimeout(idleTimerId);
       observer.disconnect();
-      video.removeEventListener('loadedmetadata', onLoadedMetadata);
-      video.removeEventListener('seeked', onSeeked);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchmove', handleTouchMove);
+      video.removeEventListener('seeked', onSeekDone);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
     };
   }, []);
 
@@ -235,40 +235,39 @@ export const HeroSection: React.FC = () => {
       className="relative w-full min-h-[100dvh] flex flex-col justify-end md:justify-center items-start px-5 sm:px-10 md:px-16 lg:px-20 overflow-hidden select-none pt-24 pb-12 sm:pb-16 md:py-0"
     >
       {/* 
-        CONTAINER WITH MOUSE-SCRUBBED 3D CHARACTER ANIMATION
-        Optimized with GPU translate3d and instantaneous poster fallback
+        ORIGINAL HIGH-DEFINITION 1080P 3D CHARACTER ANIMATION
+        Scrubbed seamlessly with cursor movement at full native quality
       */}
       <div
         ref={videoContainerRef}
         className="fixed inset-0 w-full h-full pointer-events-none z-0 will-change-transform bg-[#F9F7F4]"
         style={{
-          backgroundImage: 'url(/hero-poster.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          transform: 'translate3d(0px, 0px, 0) scale(1.03)',
+          transform: 'perspective(1200px) rotateY(0deg) rotateX(0deg) translate3d(0px, 0px, 0) scale(1.03)',
         }}
       >
+        {!videoLoaded && (
+          <img
+            src="/hero-poster.webp"
+            alt="Fahim A Elahi Character"
+            className="absolute inset-0 w-full h-full object-cover object-[78%_center] md:object-[78%_center] pointer-events-none select-none"
+          />
+        )}
         <video
           ref={videoRef}
+          src="/character-anim.mp4"
+          poster="/hero-poster.webp"
           muted
           playsInline
-          autoPlay={false}
-          loop={false}
           preload="auto"
-          crossOrigin="anonymous"
-          poster="/hero-poster.webp"
-          disablePictureInPicture
-          className="w-full h-full object-cover select-none pointer-events-none object-[70%_25%] md:object-[78%_25%]"
-        >
-          {/* Local high-speed intra-frame version (Zero-lag instant seek) */}
-          <source src="/character-anim.mp4" type="video/mp4" />
-          {/* Fallback CDN link */}
-          <source src="https://res.cloudinary.com/v3pwznsb/video/upload/v1789555490/0916.mp4" type="video/mp4" />
-        </video>
+          onLoadedData={() => setVideoLoaded(true)}
+          className={`w-full h-full object-cover object-[78%_center] md:object-[78%_center] select-none transition-opacity duration-500 ${
+            videoLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
       </div>
 
       {/* 
-        GRID OVERLAY
+        ARCHITECTURAL GRID OVERLAY
       */}
       <div
         className="absolute inset-0 z-1 pointer-events-none opacity-20"
@@ -280,7 +279,7 @@ export const HeroSection: React.FC = () => {
       />
 
       {/* 
-        HERO SECTION CONTENT
+        HERO SECTION CONTENT & TYPOGRAPHY
       */}
       <div className="relative z-10 w-full max-w-xl lg:max-w-2xl text-left flex flex-col items-start">
         
@@ -336,6 +335,12 @@ export const HeroSection: React.FC = () => {
             INITIATE COMMISSION
           </a>
         </div>
+      </div>
+
+      {/* Floating Interactive 3D Cursor Tracking Indicator badge at bottom right */}
+      <div className="hidden md:flex absolute bottom-6 right-8 z-10 items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 border border-black/10 backdrop-blur-md shadow-xs pointer-events-none text-[11px] font-mono text-neutral-700 select-none">
+        <Compass className="w-3.5 h-3.5 text-[#E09015] animate-spin" style={{ animationDuration: '8s' }} />
+        <span>Live 3D Cursor Scrubbing</span>
       </div>
     </section>
   );

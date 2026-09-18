@@ -86,6 +86,8 @@ export default function App() {
       {/* 6. Interactive Modals & Drawers */}
       <ProjectModal
         project={selectedProject}
+        projects={portfolioProjects}
+        onSelectProject={handleSelectProject}
         onClose={handleCloseProject}
         onOpenContact={handleOpenContactModal}
       />

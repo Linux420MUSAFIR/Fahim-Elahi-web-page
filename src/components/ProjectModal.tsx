@@ -1,14 +1,22 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Project } from '../types';
-import { X, Play, Pause, Volume2, VolumeX, Camera, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { X, Play, Pause, Volume2, VolumeX, Camera, Maximize2, Minimize2, Sparkles, ChevronDown, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface ProjectModalProps {
   project: Project | null;
+  projects?: Project[];
+  onSelectProject?: (project: Project) => void;
   onClose: () => void;
   onOpenContact: () => void;
 }
 
-export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, onOpenContact }) => {
+export const ProjectModal: React.FC<ProjectModalProps> = ({
+  project,
+  projects = [],
+  onSelectProject,
+  onClose,
+  onOpenContact,
+}) => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [selectedStillIndex, setSelectedStillIndex] = useState<number | null>(null);
@@ -17,9 +25,13 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
   const [durationFormatted, setDurationFormatted] = useState('0:00');
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const [showPlayAnimation, setShowPlayAnimation] = useState<'play' | 'pause' | null>(null);
+  const [videoAspect, setVideoAspect] = useState<number | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
+  const controlsTimerRef = useRef<number | null>(null);
 
   // Lock background scrolling when modal is active
   useEffect(() => {
@@ -47,14 +59,53 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isTheaterMode, onClose]);
 
+  const showControlsTemporarily = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimerRef.current) {
+      window.clearTimeout(controlsTimerRef.current);
+    }
+    if (isPlaying) {
+      controlsTimerRef.current = window.setTimeout(() => {
+        setControlsVisible(false);
+      }, 2500);
+    }
+  }, [isPlaying]);
+
   useEffect(() => {
-    // Reset selection and play state whenever modal opens or project changes
+    // Reset selection, play state and scroll position whenever modal opens or project changes
     setSelectedStillIndex(null);
     setIsPlaying(true);
     setIsMuted(true);
     setProgress(0);
     setIsTheaterMode(false);
+    setVideoAspect(null);
+    setControlsVisible(true);
+
+    if (contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = 0;
+    }
   }, [project]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      setControlsVisible(true);
+      if (controlsTimerRef.current) window.clearTimeout(controlsTimerRef.current);
+    } else {
+      showControlsTemporarily();
+    }
+  }, [isPlaying, showControlsTemporarily]);
+
+  const handleLoadedMetadata = () => {
+    const video = videoRef.current;
+    if (video) {
+      if (video.videoWidth && video.videoHeight) {
+        setVideoAspect(video.videoWidth / video.videoHeight);
+      }
+      if (video.duration) {
+        setDurationFormatted(formatTime(video.duration));
+      }
+    }
+  };
 
   const formatTime = (seconds: number) => {
     if (isNaN(seconds) || seconds < 0) return '0:00';
@@ -151,30 +202,56 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
     }
   };
 
+  const scrollToDescription = () => {
+    const el = document.getElementById('project-details-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const currentIndex = projects.findIndex((p) => p.id === project.id);
+  const prevProject =
+    currentIndex > 0
+      ? projects[currentIndex - 1]
+      : projects.length > 0
+        ? projects[projects.length - 1]
+        : null;
+  const nextProject =
+    currentIndex >= 0 && currentIndex < projects.length - 1
+      ? projects[currentIndex + 1]
+      : projects.length > 0
+        ? projects[0]
+        : null;
+
+  const isVerticalVideo =
+    project.aspectRatio === 'aspect-[9/16]' ||
+    project.aspectRatio === 'aspect-[4/5]' ||
+    (videoAspect !== null && videoAspect < 0.95);
+
   return (
     <div
       id="project-detail-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 md:p-6 bg-[#0A0A0A]/95 backdrop-blur-lg overflow-y-auto animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-3 md:p-4 bg-black/95 backdrop-blur-xl overflow-hidden animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
         className={`relative w-full ${
           isTheaterMode
             ? 'fixed inset-0 z-50 h-full max-h-none rounded-none bg-black border-none my-0 flex flex-col justify-between'
-            : 'max-w-5xl bg-[#0A0A0A] border-0 sm:border border-[#262626] rounded-none sm:rounded-[24px] overflow-hidden text-white shadow-2xl my-0 sm:my-8 h-full sm:h-auto sm:max-h-[92vh] flex flex-col'
+            : 'max-w-6xl bg-[#0A0A0A] border-0 sm:border border-white/10 rounded-none sm:rounded-[24px] overflow-hidden text-white shadow-2xl my-0 sm:my-3 h-full sm:h-[96vh] flex flex-col'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header bar */}
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-[#262626] bg-[#111111]/90 backdrop-blur-md sticky top-0 z-30 shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-white/10 bg-[#111111]/95 backdrop-blur-md sticky top-0 z-40 shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#F5AC27] shrink-0 animate-pulse" />
-            <span className="text-xs sm:text-xs font-mono uppercase tracking-wider text-zinc-300 truncate">
-              {project.categoryLabel} <span className="text-zinc-500">//</span> {project.year}
+            <span className="text-xs font-mono uppercase tracking-wider text-zinc-300 truncate">
+              {project.categoryLabel} <span className="text-zinc-500">//</span> {project.title} <span className="text-zinc-500 hidden sm:inline">// {project.year}</span>
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Quick Fullscreen / Theater Toggle Button on Header */}
             {hasVideo && (
               <button
@@ -207,18 +284,29 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
         </div>
 
         {/* Scrollable Content Container */}
-        <div className={`overflow-y-auto ${isTheaterMode ? 'grow flex flex-col justify-center p-2 sm:p-6' : 'p-3 sm:p-6 md:p-8 space-y-6 sm:space-y-8'}`}>
-          {/* Main Media Player / Showcase Stage - High-Quality View optimized for Phone & Desktop */}
+        <div
+          ref={contentScrollRef}
+          className="grow overflow-y-auto overflow-x-hidden scroll-smooth flex flex-col"
+        >
+          {/* SECTION 1: HERO MEDIA STAGE (100% of viewport upon opening - Video First!) */}
           <div
-            className={`relative w-full overflow-hidden bg-black border border-white/10 flex items-center justify-center group select-none ${
+            onMouseMove={showControlsTemporarily}
+            onTouchStart={showControlsTemporarily}
+            className={`relative w-full overflow-hidden flex items-center justify-center group select-none transition-all duration-300 shrink-0 bg-black ${
               isTheaterMode
-                ? 'h-full max-h-[82vh] rounded-xl'
-                : 'aspect-video rounded-[14px] sm:rounded-[18px] shadow-2xl'
+                ? 'h-full max-h-none grow'
+                : 'h-[calc(100vh-58px)] sm:h-[calc(96vh-64px)] min-h-[500px] max-h-[920px]'
             }`}
           >
+            {/* Ambient cinematic backdrop using project poster */}
+            <div
+              className="absolute inset-0 bg-cover bg-center blur-3xl opacity-25 scale-125 pointer-events-none"
+              style={{ backgroundImage: `url(${currentPoster})` }}
+            />
+
             {showVideo ? (
               <div
-                className="relative w-full h-full flex items-center justify-center cursor-pointer"
+                className="relative z-10 w-full h-full flex items-center justify-center cursor-pointer p-2 sm:p-4 md:p-6"
                 onClick={togglePlay}
               >
                 <video
@@ -230,10 +318,15 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
                   muted={isMuted}
                   loop
                   preload="auto"
+                  onLoadedMetadata={handleLoadedMetadata}
                   onTimeUpdate={handleTimeUpdate}
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
-                  className="w-full h-full object-contain"
+                  className={`object-contain transition-all duration-300 drop-shadow-2xl ${
+                    isVerticalVideo
+                      ? 'h-full max-h-[82vh] sm:max-h-[86vh] w-auto aspect-[9/16] rounded-xl sm:rounded-2xl border border-white/15'
+                      : 'w-full max-w-5xl h-full max-h-[82vh] sm:max-h-[86vh] rounded-xl sm:rounded-2xl border border-white/10'
+                  }`}
                 />
 
                 {/* Animated Central Tap-To-Play Indicator */}
@@ -248,31 +341,33 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
                 )}
               </div>
             ) : (
-              <img
-                src={
-                  selectedStillIndex !== null && project.stills && project.stills[selectedStillIndex]
-                    ? project.stills[selectedStillIndex]
-                    : currentPoster
-                }
-                alt={project.title}
-                loading="eager"
-                decoding="async"
-                className={`w-full h-full object-contain transition-all duration-700 ${
-                  isPlaying ? 'scale-100' : 'scale-95'
-                }`}
-                referrerPolicy="no-referrer"
-              />
+              <div className="relative z-10 w-full h-full flex items-center justify-center p-3 sm:p-6">
+                <img
+                  src={
+                    selectedStillIndex !== null && project.stills && project.stills[selectedStillIndex]
+                      ? project.stills[selectedStillIndex]
+                      : currentPoster
+                  }
+                  alt={project.title}
+                  loading="eager"
+                  decoding="async"
+                  className={`max-h-[82vh] max-w-full object-contain rounded-xl sm:rounded-2xl border border-white/15 shadow-2xl transition-all duration-500`}
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             )}
 
-            {/* Video Player Controls Overlay (Only shown for video projects) */}
+            {/* Video Player Controls Overlay (Auto-hides while playing) */}
             {showVideo && (
               <div
-                className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/60 flex flex-col justify-between p-3 sm:p-5 pointer-events-none transition-opacity duration-300"
+                className={`absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-black/60 flex flex-col justify-between p-3 sm:p-5 pointer-events-none transition-opacity duration-300 z-20 ${
+                  controlsVisible || !isPlaying ? 'opacity-100' : 'opacity-0'
+                }`}
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Top badges */}
                 <div className="flex items-center justify-between pointer-events-auto">
-                  <span className="bg-[#0A0A0A]/85 backdrop-blur-md px-3 py-1 rounded-full text-[11px] sm:text-xs font-mono text-[#F5AC27] border border-[#F5AC27]/30 shadow-xs">
+                  <span className="bg-[#0A0A0A]/85 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-mono text-[#F5AC27] border border-[#F5AC27]/30 shadow-md font-medium">
                     {project.client}
                   </span>
 
@@ -281,16 +376,16 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
                     {isMuted && (
                       <button
                         onClick={toggleMute}
-                        className="bg-[#F5AC27] text-[#0A0A0A] px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-mono font-bold flex items-center gap-1 shadow-md hover:scale-105 transition-transform cursor-pointer"
+                        className="bg-[#F5AC27] text-[#0A0A0A] px-3 py-1 rounded-full text-xs font-mono font-bold flex items-center gap-1.5 shadow-md hover:scale-105 transition-transform cursor-pointer"
                       >
-                        <Volume2 className="w-3 h-3" />
+                        <Volume2 className="w-3.5 h-3.5" />
                         <span>Tap for Sound</span>
                       </button>
                     )}
 
                     <button
                       onClick={toggleFullscreen}
-                      className="p-1.5 sm:p-2 rounded-full bg-black/70 hover:bg-black/90 text-zinc-300 hover:text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
+                      className="p-2 rounded-full bg-black/70 hover:bg-black/90 text-zinc-300 hover:text-white backdrop-blur-md transition-colors cursor-pointer border border-white/10"
                       title="Toggle Theater / Fullscreen"
                     >
                       {isTheaterMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-[#F5AC27]" />}
@@ -298,8 +393,8 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
                   </div>
                 </div>
 
-                {/* Bottom Playback Bar */}
-                <div className="space-y-2 pointer-events-auto bg-black/60 backdrop-blur-md p-2.5 sm:p-3 rounded-xl border border-white/10">
+                {/* Bottom Playback Bar (Clean floating capsule) */}
+                <div className="w-full max-w-lg mx-auto mb-12 sm:mb-14 space-y-2 pointer-events-auto bg-black/80 backdrop-blur-md p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-white/15 shadow-2xl">
                   {/* Interactive touch & click scrub bar */}
                   <div
                     ref={progressBarRef}
@@ -364,137 +459,191 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({ project, onClose, on
                 </div>
               </div>
             )}
+
+            {/* Floating Pinned Button to Scroll Down to Description */}
+            {!isTheaterMode && (
+              <button
+                onClick={scrollToDescription}
+                className="absolute bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2.5 px-5 py-2 rounded-full bg-[#0A0A0A]/90 hover:bg-[#F5AC27] text-zinc-300 hover:text-[#0A0A0A] border border-white/20 hover:border-[#F5AC27] backdrop-blur-md text-xs font-mono font-bold transition-all shadow-2xl cursor-pointer group hover:scale-105"
+                aria-label="Scroll down for project details"
+              >
+                <span className="w-2 h-2 rounded-full bg-[#F5AC27] group-hover:bg-[#0A0A0A] animate-pulse" />
+                <span>Scroll for Story & Description</span>
+                <ChevronDown className="w-4 h-4 text-[#F5AC27] group-hover:text-[#0A0A0A] animate-bounce" />
+              </button>
+            )}
           </div>
 
-          {/* Stills Gallery Selector (Rendered if project has multiple stills) */}
-          {!isTheaterMode && project.stills && project.stills.length > 1 && (
-            <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-              <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider shrink-0">
-                media:
-              </span>
-              {hasVideo && (
-                <button
-                  onClick={() => setSelectedStillIndex(null)}
-                  className={`relative px-3 py-1.5 rounded-lg text-xs font-mono uppercase tracking-wider shrink-0 border transition-all cursor-pointer ${
-                    selectedStillIndex === null
-                      ? 'border-[#F5AC27] bg-[#F5AC27]/20 text-[#F5AC27] font-bold'
-                      : 'border-white/10 text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  ▶ Video Reel
-                </button>
-              )}
-              {project.stills.map((still, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedStillIndex(idx)}
-                  className={`relative w-16 sm:w-20 h-11 sm:h-14 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer bg-black ${
-                    selectedStillIndex === idx
-                      ? 'border-[#F5AC27] scale-105 shadow-md'
-                      : 'border-transparent opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  <img
-                    src={still}
-                    alt={`Frame ${idx + 1}`}
-                    loading="lazy"
-                    decoding="async"
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Titles & Technical Specs Grid (Hidden when in Theater view for pure cinema focus) */}
+          {/* SECTION 2: PROJECT CASE STUDY DETAILS (Strictly Below the fold upon scrolling) */}
           {!isTheaterMode && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 pt-4 border-t border-[#262626]">
-              <div className="lg:col-span-8 space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-[#F5AC27] uppercase tracking-widest bg-[#F5AC27]/10 px-2.5 py-0.5 rounded-full border border-[#F5AC27]/30">
-                    {project.categoryLabel}
+            <div
+              id="project-details-section"
+              className="w-full max-w-5xl mx-auto px-4 sm:px-8 py-8 sm:py-12 space-y-8 sm:space-y-10 shrink-0"
+            >
+              {/* Stills Gallery Selector (Rendered if project has multiple stills) */}
+              {project.stills && project.stills.length > 1 && (
+                <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+                  <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider shrink-0">
+                    media:
                   </span>
-                  {project.featured && (
-                    <span className="text-xs font-mono text-white flex items-center gap-1">
-                      <Sparkles className="w-3 h-3 text-[#F5AC27]" />
-                      Featured Project
+                  {hasVideo && (
+                    <button
+                      onClick={() => setSelectedStillIndex(null)}
+                      className={`relative px-3 py-1.5 rounded-lg text-xs font-mono uppercase tracking-wider shrink-0 border transition-all cursor-pointer ${
+                        selectedStillIndex === null
+                          ? 'border-[#F5AC27] bg-[#F5AC27]/20 text-[#F5AC27] font-bold'
+                          : 'border-white/10 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      ▶ Video Reel
+                    </button>
+                  )}
+                  {project.stills.map((still, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedStillIndex(idx)}
+                      className={`relative w-16 sm:w-20 h-11 sm:h-14 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer bg-black ${
+                        selectedStillIndex === idx
+                          ? 'border-[#F5AC27] scale-105 shadow-md'
+                          : 'border-transparent opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      <img
+                        src={still}
+                        alt={`Frame ${idx + 1}`}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Titles & Technical Specs Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 pt-4 border-t border-white/10">
+                <div className="lg:col-span-8 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-[#F5AC27] uppercase tracking-widest bg-[#F5AC27]/10 px-2.5 py-0.5 rounded-full border border-[#F5AC27]/30">
+                      {project.categoryLabel}
                     </span>
-                  )}
-                </div>
+                    {project.featured && (
+                      <span className="text-xs font-mono text-white flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-[#F5AC27]" />
+                        Featured Project
+                      </span>
+                    )}
+                  </div>
 
-                <h2 className="font-display font-extrabold text-2xl sm:text-3xl md:text-4xl tracking-tight lowercase text-white leading-tight">
-                  {project.title}
-                </h2>
+                  <h2 className="font-display font-extrabold text-2xl sm:text-3xl md:text-4xl tracking-tight lowercase text-white leading-tight">
+                    {project.title}
+                  </h2>
 
-                <div className="prose prose-invert max-w-none">
-                  <p className="text-sm sm:text-base text-zinc-300 leading-relaxed">
-                    {project.longSynopsis}
-                  </p>
-                  {project.description && project.description !== project.longSynopsis && (
-                    <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-mono mt-3">
-                      Concept: {project.description}
+                  <div className="prose prose-invert max-w-none">
+                    <p className="text-sm sm:text-base text-zinc-300 leading-relaxed">
+                      {project.longSynopsis}
                     </p>
+                    {project.description && project.description !== project.longSynopsis && (
+                      <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-mono mt-3">
+                        Concept: {project.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Core Highlights */}
+                  {project.highlights && project.highlights.length > 0 && (
+                    <div className="pt-4 border-t border-white/10 mt-5">
+                      <h4 className="text-xs font-mono uppercase tracking-widest text-[#F5AC27] mb-3">
+                        Key Highlights & Technical Focus
+                      </h4>
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-zinc-200">
+                        {project.highlights.map((point, idx) => (
+                          <li key={idx} className="flex items-center gap-2.5 bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono text-xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#F5AC27] shrink-0" />
+                            <span>{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
 
-                {/* Core Highlights */}
-                {project.highlights && project.highlights.length > 0 && (
-                  <div className="pt-4 border-t border-white/10 mt-5">
-                    <h4 className="text-xs font-mono uppercase tracking-widest text-[#F5AC27] mb-3">
-                      Key Highlights & Technical Focus
-                    </h4>
-                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-zinc-200">
-                      {project.highlights.map((point, idx) => (
-                        <li key={idx} className="flex items-center gap-2.5 bg-white/5 border border-white/10 px-3 py-2 rounded-lg font-mono text-xs">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#F5AC27] shrink-0" />
-                          <span>{point}</span>
-                        </li>
-                      ))}
-                    </ul>
+                {/* Technical Specs & Credits Card */}
+                <div className="lg:col-span-4 bg-[#141414] p-4 sm:p-5 rounded-[18px] border border-[#262626] space-y-3.5 sm:space-y-4 h-fit">
+                  <div className="text-xs font-mono uppercase tracking-widest text-[#F5AC27] flex items-center gap-1.5 pb-2 border-b border-white/10">
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>{project.dossierTitle || 'technical dossier'}</span>
                   </div>
-                )}
-              </div>
 
-              {/* Technical Specs & Credits Card */}
-              <div className="lg:col-span-4 bg-[#141414] p-4 sm:p-5 rounded-[18px] border border-[#262626] space-y-3.5 sm:space-y-4">
-                <div className="text-xs font-mono uppercase tracking-widest text-[#F5AC27] flex items-center gap-1.5 pb-2 border-b border-white/10">
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>{project.dossierTitle || 'technical dossier'}</span>
-                </div>
-
-                <div>
-                  <span className="text-[11px] font-mono uppercase text-zinc-500 block">optics & software</span>
-                  <span className="text-xs font-mono text-zinc-200">{project.cameraSpecs}</span>
-                </div>
-
-                <div>
-                  <span className="text-[11px] font-mono uppercase text-zinc-500 block">location</span>
-                  <span className="text-xs font-mono text-zinc-200">{project.location}</span>
-                </div>
-
-                <div>
-                  <span className="text-[11px] font-mono uppercase text-zinc-500 block">artist role</span>
-                  <span className="text-xs font-mono text-zinc-200">{project.role}</span>
-                </div>
-
-                {project.metrics && (
                   <div>
-                    <span className="text-[11px] font-mono uppercase text-zinc-500 block">impact / laurels</span>
-                    <span className="text-xs font-mono text-[#F5AC27] font-semibold">{project.metrics}</span>
+                    <span className="text-[11px] font-mono uppercase text-zinc-500 block">optics & software</span>
+                    <span className="text-xs font-mono text-zinc-200">{project.cameraSpecs}</span>
                   </div>
-                )}
 
-                <button
-                  onClick={() => {
-                    onClose();
-                    onOpenContact();
-                  }}
-                  className="w-full mt-2 bg-[#F5AC27] hover:bg-[#E09817] text-[#0A0A0A] py-3 rounded-full text-xs font-mono uppercase font-bold tracking-wider transition-all duration-200 hover:shadow-lg cursor-pointer"
-                >
-                  inquire about similar work
-                </button>
+                  <div>
+                    <span className="text-[11px] font-mono uppercase text-zinc-500 block">location</span>
+                    <span className="text-xs font-mono text-zinc-200">{project.location}</span>
+                  </div>
+
+                  <div>
+                    <span className="text-[11px] font-mono uppercase text-zinc-500 block">artist role</span>
+                    <span className="text-xs font-mono text-zinc-200">{project.role}</span>
+                  </div>
+
+                  {project.metrics && (
+                    <div>
+                      <span className="text-[11px] font-mono uppercase text-zinc-500 block">impact / laurels</span>
+                      <span className="text-xs font-mono text-[#F5AC27] font-semibold">{project.metrics}</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenContact();
+                    }}
+                    className="w-full mt-2 bg-[#F5AC27] hover:bg-[#E09817] text-[#0A0A0A] py-3 rounded-full text-xs font-mono uppercase font-bold tracking-wider transition-all duration-200 hover:shadow-lg cursor-pointer"
+                  >
+                    inquire about similar work
+                  </button>
+                </div>
               </div>
+
+              {/* Prev / Next Project Switcher Footer */}
+              {projects.length > 1 && onSelectProject && (
+                <div className="pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  {prevProject && (
+                    <button
+                      onClick={() => onSelectProject(prevProject)}
+                      className="w-full sm:w-auto flex items-center gap-3 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-left transition-all cursor-pointer group"
+                    >
+                      <ArrowLeft className="w-4 h-4 text-[#F5AC27] group-hover:-translate-x-1 transition-transform" />
+                      <div>
+                        <span className="text-[10px] font-mono uppercase text-zinc-500 block">Previous Work</span>
+                        <span className="text-xs font-mono text-zinc-200 group-hover:text-white font-medium truncate block max-w-[200px]">
+                          {prevProject.title}
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {nextProject && (
+                    <button
+                      onClick={() => onSelectProject(nextProject)}
+                      className="w-full sm:w-auto flex items-center justify-end gap-3 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-right transition-all cursor-pointer group ml-auto"
+                    >
+                      <div>
+                        <span className="text-[10px] font-mono uppercase text-zinc-500 block">Next Work</span>
+                        <span className="text-xs font-mono text-zinc-200 group-hover:text-white font-medium truncate block max-w-[200px]">
+                          {nextProject.title}
+                        </span>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-[#F5AC27] group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
