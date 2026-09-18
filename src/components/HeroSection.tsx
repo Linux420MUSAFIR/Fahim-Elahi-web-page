@@ -23,6 +23,27 @@ export const HeroSection: React.FC = () => {
     let pendingSeekTime: number | null = null;
     let seekTimeoutId: number | null = null;
     let isHeroInView = true;
+    let activeBlobUrl: string | null = null;
+
+    // Eagerly preload video directly into browser memory (RAM) via Blob.
+    // This eliminates Vercel Edge / CDN network Range request roundtrips during mouse scrub.
+    const controller = new AbortController();
+    fetch('/character-anim.mp4', { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Blob fetch failed');
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!video) return;
+        activeBlobUrl = URL.createObjectURL(blob);
+        const curTime = video.currentTime || targetProgress * (video.duration || 5.06);
+        video.src = activeBlobUrl;
+        video.load();
+        video.currentTime = curTime;
+      })
+      .catch(() => {
+        // Fallback to standard <source> loading
+      });
 
     // Cache viewport dimensions to avoid forced synchronous layout on mousemove
     let cachedWidth = window.innerWidth || 1;
@@ -131,9 +152,13 @@ export const HeroSection: React.FC = () => {
 
       isSeeking = true;
       try {
-        video.currentTime = clampedTime;
+        if ('fastSeek' in video && typeof (video as any).fastSeek === 'function') {
+          (video as any).fastSeek(clampedTime);
+        } else {
+          video.currentTime = clampedTime;
+        }
       } catch {
-        isSeeking = false;
+        video.currentTime = clampedTime;
       }
 
       // Fallback safety timeout in case the seeked event doesn't trigger
@@ -145,7 +170,7 @@ export const HeroSection: React.FC = () => {
           pendingSeekTime = null;
           video.currentTime = next;
         }
-      }, 50);
+      }, 40);
     };
 
     video.addEventListener('seeked', onSeeked);
@@ -159,8 +184,8 @@ export const HeroSection: React.FC = () => {
 
       // Silky responsive exponential damping so it closely tracks the mouse without lag
       if (Math.abs(diffX) > 0.0001 || Math.abs(diffY) > 0.0001) {
-        currentProgress += diffX * 0.16;
-        currentProgressY += diffY * 0.16;
+        currentProgress += diffX * 0.18;
+        currentProgressY += diffY * 0.18;
 
         // Subtle 3D parallax tracking along with cursor
         const shiftX = (currentProgress - 0.5) * 28;
@@ -188,8 +213,12 @@ export const HeroSection: React.FC = () => {
     }
 
     return () => {
+      controller.abort();
       if (animId !== null) cancelAnimationFrame(animId);
       if (seekTimeoutId !== null) window.clearTimeout(seekTimeoutId);
+      if (activeBlobUrl) {
+        URL.revokeObjectURL(activeBlobUrl);
+      }
       observer.disconnect();
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('seeked', onSeeked);
@@ -225,7 +254,8 @@ export const HeroSection: React.FC = () => {
           playsInline
           autoPlay={false}
           loop={false}
-          preload="metadata"
+          preload="auto"
+          crossOrigin="anonymous"
           poster="/hero-poster.webp"
           disablePictureInPicture
           className="w-full h-full object-cover select-none pointer-events-none object-[70%_25%] md:object-[78%_25%]"

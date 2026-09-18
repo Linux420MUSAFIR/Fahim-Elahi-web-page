@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Project } from '../types';
 import { portfolioProjects } from '../data/portfolioData';
-import { ArrowUpRight, Sparkles, Clock, Film, Camera } from 'lucide-react';
+import { ArrowUpRight, Sparkles, Clock, Film, Camera, Play } from 'lucide-react';
 import { LazyVideo } from './LazyVideo';
 
 interface PortfolioSectionProps {
@@ -110,19 +110,25 @@ export const PortfolioSection: React.FC<PortfolioSectionProps> = ({ onSelectProj
                   </span>
                 </div>
 
-                {/* Floating Quick Action Button on Center Hover */}
-                <div className="absolute inset-0 m-auto w-12 sm:w-14 h-12 sm:h-14 rounded-full bg-white text-[#0A0A0A] flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:scale-100 scale-75 transition-all duration-300 shadow-xl z-20 pointer-events-none">
-                  <ArrowUpRight className="w-5 sm:w-6 h-5 sm:h-6" />
+                {/* Floating Quick Action / Play Reel Button */}
+                <div className="absolute inset-0 m-auto w-12 sm:w-14 h-12 sm:h-14 rounded-full bg-[#0A0A0A]/75 sm:bg-white text-white sm:text-[#0A0A0A] backdrop-blur-md sm:backdrop-blur-none border border-white/20 sm:border-transparent flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 sm:scale-75 group-hover:scale-100 transition-all duration-300 shadow-xl z-20 pointer-events-none">
+                  <Play className="w-5 sm:w-6 h-5 sm:h-6 fill-[#F5AC27] sm:fill-[#0A0A0A] text-[#F5AC27] sm:text-[#0A0A0A] translate-x-0.5" />
                 </div>
 
-                {/* Bottom Card: ONLY Title in Preview (Unobstructed View) */}
-                <div className="absolute bottom-0 left-0 right-0 pt-12 pb-4 sm:pb-5 px-4 sm:px-6 bg-gradient-to-t from-[#0A0A0A]/95 via-[#0A0A0A]/50 to-transparent text-white flex items-end justify-between gap-3 z-10 pointer-events-none">
-                  <h3 className="font-display font-extrabold text-lg sm:text-xl md:text-2xl lg:text-[26px] tracking-tight lowercase leading-tight text-white group-hover:text-[#F5AC27] transition-colors drop-shadow-sm">
-                    {project.title}
-                  </h3>
+                {/* Bottom Card: Title & Mobile Tap Indicator */}
+                <div className="absolute bottom-0 left-0 right-0 pt-12 pb-3.5 sm:pb-5 px-3.5 sm:px-6 bg-gradient-to-t from-[#0A0A0A]/95 via-[#0A0A0A]/60 to-transparent text-white flex items-end justify-between gap-3 z-10 pointer-events-none">
+                  <div>
+                    <h3 className="font-display font-extrabold text-base sm:text-xl md:text-2xl lg:text-[26px] tracking-tight lowercase leading-tight text-white group-hover:text-[#F5AC27] transition-colors drop-shadow-sm">
+                      {project.title}
+                    </h3>
+                    <span className="text-[10px] sm:hidden font-mono text-[#F5AC27] flex items-center gap-1 mt-0.5 font-bold">
+                      <Play className="w-2.5 h-2.5 fill-current" />
+                      tap to watch large video
+                    </span>
+                  </div>
                   
-                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-mono text-zinc-300 group-hover:text-[#F5AC27] transition-colors shrink-0">
-                    <span className="hidden sm:inline">view</span>
+                  <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-mono text-zinc-300 group-hover:text-[#F5AC27] transition-colors shrink-0 bg-white/10 sm:bg-transparent px-2.5 sm:px-0 py-1 sm:py-0 rounded-full sm:rounded-none">
+                    <span className="hidden sm:inline">watch reel</span>
                     <ArrowUpRight className="w-3.5 h-3.5 text-[#F5AC27]" />
                   </span>
                 </div>
